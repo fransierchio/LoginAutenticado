@@ -17,11 +17,17 @@ class VentanaRecuperacion(ctk.CTkToplevel):
         self.onSuccess = onSuccess
         
         self.title("Recuperar acceso")
-        self.geometry("510x540")
-        x = (self.winfo_screenwidth() // 2) - 255
-        y = (self.winfo_screenheight() // 2) - 270
-        self.geometry(f"510x540+{x}+{y}")
+        
+        ancho = self.winfo_screenwidth()
+        alto = self.winfo_screenheight()
+        w = min(540, ancho - 100)
+        h = min(570, alto - 100)
+        
+        x = (ancho // 2) - (w // 2)
+        y = (alto // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
         self.configure(fg_color="#1e1e1e")
+        self.resizable(False, False)
         
         self.crearInterfaz()
         self.transient(parent)
@@ -75,42 +81,22 @@ class VentanaRecuperacion(ctk.CTkToplevel):
                      corner_radius=6, font=ctk.CTkFont(size=13)).pack(side="left", padx=5)
     
     def recuperar(self):
-        try:
-            email = self.emailEntry.get().strip()
-            pregunta = self.preguntaCombo.get()
-            respuesta = self.respuestaEntry.get().strip()
-            
-            if not email or not respuesta:
-                messagebox.showerror("Error", "Por favor completa todos los campos")
-                return
-            
-            userId = self.bd.validarRespuestaSeguridad(email, pregunta, respuesta)
-            
-            if userId:
-                nuevaPassword = self.bd.generarPasswordTemporal(userId)
-                
-                try:
-                    enviado = self.servicioCorreo.enviarPasswordTemporal(email, nuevaPassword)
-                except Exception as e:
-                    print(f"Error enviando correo: {e}")
-                    enviado = False
-                
-                try:
-                    self.mostrarPasswordVentana(nuevaPassword, enviado=enviado, email=email)
-                    self.onSuccess()
-                    self.destroy()
-                except Exception as e:
-                    print(f"Error mostrando ventana: {e}")
-                    messagebox.showinfo("Contraseña Temporal", 
-                                      f"Tu nueva contraseña temporal es:\n\n{nuevaPassword}\n\n" +
-                                      f"Cópiala y úsala para iniciar sesión.")
-                    self.onSuccess()
-                    self.destroy()
-            else:
-                messagebox.showerror("Error", "Los datos ingresados no coinciden con ninguna cuenta.")
-        except Exception as e:
-            print(f"Error en recuperación: {e}")
-            messagebox.showerror("Error", "Ocurrió un error. Por favor intenta de nuevo.")
+        email = self.emailEntry.get().strip()
+        pregunta = self.preguntaCombo.get()
+        respuesta = self.respuestaEntry.get().strip()
+        
+        if not email or not respuesta:
+            messagebox.showerror("Error", "Por favor completa todos los campos")
+            return
+        
+        userId = self.bd.validarRespuestaSeguridad(email, pregunta, respuesta)
+        
+        if userId:
+            nuevaPassword = self.bd.generarPasswordTemporal(userId)
+            enviado = self.servicioCorreo.enviarPasswordTemporal(email, nuevaPassword)
+            self.mostrarPasswordVentana(nuevaPassword, enviado=enviado, email=email)
+        else:
+            messagebox.showerror("Error", "Los datos ingresados no coinciden con ninguna cuenta.")
     
     def mostrarPasswordVentana(self, password, enviado=False, email=""):
         ventana = ctk.CTkToplevel(self)
@@ -130,24 +116,27 @@ class VentanaRecuperacion(ctk.CTkToplevel):
                         text_color="#2d7a3e").pack(pady=(20, 10))
             ctk.CTkLabel(frame, text=f"Se ha enviado a: {email}",
                         font=ctk.CTkFont(size=12), text_color="#9b9b9b").pack(pady=(0, 20))
+            passwordFrame = ctk.CTkFrame(frame, fg_color="#262626", corner_radius=10, border_width=2,
+                                         border_color="#2d7a3e")
         else:
             ctk.CTkLabel(frame, text="⚠️ No se pudo enviar el correo", 
                         font=ctk.CTkFont(size=22, weight="bold"),
                         text_color="#d9534f").pack(pady=(20, 10))
             ctk.CTkLabel(frame, text="Copia manualmente tu contraseña temporal",
                         font=ctk.CTkFont(size=12), text_color="#9b9b9b").pack(pady=(0, 20))
-            
             passwordFrame = ctk.CTkFrame(frame, fg_color="#262626", corner_radius=10, border_width=2,
                                          border_color="#d9534f")
+        
         passwordFrame.pack(pady=20, padx=30)
         
         ctk.CTkLabel(passwordFrame, text="CONTRASEÑA TEMPORAL:",
                     font=ctk.CTkFont(size=11, weight="bold"),
                     text_color="#8a8a8a").pack(padx=40, pady=(15, 5))
         
+        color_password = "#2d7a3e" if enviado else "#d9534f"
         passwordLabel = ctk.CTkLabel(passwordFrame, text=password,
                                      font=ctk.CTkFont(size=28, weight="bold", family="Courier New"),
-                                     text_color="#d9534f")
+                                     text_color=color_password)
         passwordLabel.pack(padx=40, pady=(0, 15))
         
         ctk.CTkButton(frame, text="📋 Copiar al portapapeles", 
@@ -155,12 +144,17 @@ class VentanaRecuperacion(ctk.CTkToplevel):
                      width=300, height=45, fg_color="#4a90e2", hover_color="#357abd",
                      corner_radius=6, font=ctk.CTkFont(size=13, weight="bold")).pack(pady=10)
         
-        ctk.CTkButton(frame, text="Cerrar", command=ventana.destroy,
+        ctk.CTkButton(frame, text="Cerrar", command=lambda: self.cerrarVentanas(ventana),
                      width=300, height=40, fg_color="#505050", hover_color="#404040",
                      corner_radius=6).pack(pady=5)
         
         ventana.transient(self)
         ventana.grab_set()
+    
+    def cerrarVentanas(self, ventanaModal):
+        self.onSuccess()
+        self.destroy()
+        ventanaModal.destroy()
     
     def copiarPortapapeles(self, texto, ventana):
         ventana.clipboard_clear()

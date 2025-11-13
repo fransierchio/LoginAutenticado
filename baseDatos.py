@@ -11,18 +11,30 @@ class BaseDatos:
         self.crearTablas()
     
     def crearTablas(self):
-        # Tabla de usuarios
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT UNIQUE NOT NULL,
                 passwordHash TEXT NOT NULL,
                 securityQuestion TEXT NOT NULL,
-                securityAnswerHash TEXT NOT NULL
+                securityAnswerHash TEXT NOT NULL,
+                nombre TEXT DEFAULT '',
+                telefono TEXT DEFAULT ''
             )
         """)
         
-        # Tabla de códigos OTP
+        columnas_adicionales = [
+            "ALTER TABLE users ADD COLUMN nombre TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN telefono TEXT DEFAULT ''"
+        ]
+        
+        for columna in columnas_adicionales:
+            try:
+                self.cursor.execute(columna)
+            except sqlite3.OperationalError:
+                pass
+        
+        # Códigos OTP
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS otpCodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,87 +60,116 @@ class BaseDatos:
                               (email, passHash, pregunta, respHash))
             self.conn.commit()
             return True
-        except:
+        except sqlite3.IntegrityError:
             return False
     
     def login(self, email, password):
-        try:
-            passHash = self.hash(password)
-            self.cursor.execute("SELECT id FROM users WHERE email = ? AND passwordHash = ?", 
-                              (email, passHash))
-            result = self.cursor.fetchone()
-            return result[0] if result else None
-        except:
-            return None
+        passHash = self.hash(password)
+        self.cursor.execute("SELECT id FROM users WHERE email = ? AND passwordHash = ?",
+                          (email, passHash))
+        res = self.cursor.fetchone()
+        return res[0] if res else None
     
     def generarOTP(self, userId):
-        try:
-            codigo = ''.join(random.choices(string.digits, k=6))
-            expira = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
-            self.cursor.execute("INSERT INTO otpCodes (userId, code, expiresAt, attempts, used) VALUES (?, ?, ?, 0, 0)",
-                              (userId, codigo, expira))
-            self.conn.commit()
-            return codigo
-        except:
-            return '000000'
+        codigo = ''.join(random.choices(string.digits, k=6))
+        expira = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        self.cursor.execute("INSERT INTO otpCodes (userId, code, expiresAt, attempts, used) VALUES (?, ?, ?, 0, 0)",
+                          (userId, codigo, expira))
+        self.conn.commit()
+        return codigo
     
     def validarOTP(self, userId, codigo):
-        try:
-            self.cursor.execute("""
-                SELECT id, code, expiresAt, attempts
-                FROM otpCodes
-                WHERE userId = ? AND used = 0
-                ORDER BY id DESC
-                LIMIT 1
-            """, (userId,))
-            
-            result = self.cursor.fetchone()
-            if not result:
-                return False
-            
-            otpId, codigoGuardado, expira, intentos = result
-            
-            expiraFecha = datetime.strptime(expira, "%Y-%m-%d %H:%M:%S")
-            if datetime.now() > expiraFecha:
-                return False
-            
-            if intentos >= 3:
-                return False
-            
-            self.cursor.execute("UPDATE otpCodes SET attempts = attempts + 1 WHERE id = ?", (otpId,))
+        self.cursor.execute("""
+            SELECT id, code, expiresAt, attempts
+            FROM otpCodes
+            WHERE userId = ? AND used = 0
+            ORDER BY id DESC
+            LIMIT 1
+        """, (userId,))
+        
+        result = self.cursor.fetchone()
+        if not result:
+            return False
+        
+        otpId, codigoGuardado, expira, intentos = result
+        
+        expirationTime = datetime.strptime(expira, "%Y-%m-%d %H:%M:%S")
+        if datetime.now() > expirationTime or intentos >= 3:
+            return False
+        
+        self.cursor.execute("UPDATE otpCodes SET attempts = attempts + 1 WHERE id = ?", (otpId,))
+        self.conn.commit()
+        
+        if codigo == codigoGuardado:
+            self.cursor.execute("UPDATE otpCodes SET used = 1 WHERE id = ?", (otpId,))
             self.conn.commit()
-            
-            if codigo == codigoGuardado:
-                self.cursor.execute("UPDATE otpCodes SET used = 1 WHERE id = ?", (otpId,))
-                self.conn.commit()
-                return True
-            return False
-        except:
-            return False
+            return True
+        return False
     
     def validarRespuestaSeguridad(self, email, pregunta, respuesta):
-        try:
-            respHash = self.hash(respuesta.lower().strip())
-            self.cursor.execute("SELECT id FROM users WHERE email = ? AND securityQuestion = ? AND securityAnswerHash = ?",
-                              (email, pregunta, respHash))
-            result = self.cursor.fetchone()
-            return result[0] if result else None
-        except:
-            return None
+        respHash = self.hash(respuesta.lower().strip())
+        self.cursor.execute("SELECT id FROM users WHERE email = ? AND securityQuestion = ? AND securityAnswerHash = ?",
+                          (email, pregunta, respHash))
+        result = self.cursor.fetchone()
+        return result[0] if result else None
     
     def generarPasswordTemporal(self, userId):
+        chars = string.ascii_letters + string.digits + "!@#$%&*"
+        temp = (random.choice(string.ascii_uppercase) +
+               random.choice(string.ascii_lowercase) +
+               random.choice("!@#$%&*") +
+               ''.join(random.choices(chars, k=7)))
+        passHash = self.hash(temp)
+        self.cursor.execute("UPDATE users SET passwordHash = ? WHERE id = ?", (passHash, userId))
+        self.conn.commit()
+        return temp
+    
+    def obtenerDatosUsuario(self, email):
+        self.cursor.execute("SELECT id, email, nombre, securityQuestion, securityAnswerHash FROM users WHERE email = ?", (email,))
+        result = self.cursor.fetchone()
+        if result:
+            return {
+                'id': result[0],
+                'email': result[1],
+                'nombre': result[2] or '',
+                'preguntaSeguridad': result[3],
+                'respuestaHash': result[4]
+            }
+        return None
+    
+    def actualizarPerfil(self, emailActual, emailNuevo, nombre):
         try:
-            chars = string.ascii_letters + string.digits + "!@#$%&*"
-            temp = (random.choice(string.ascii_uppercase) +
-                   random.choice(string.ascii_lowercase) +
-                   random.choice("!@#$%&*") +
-                   ''.join(random.choices(chars, k=7)))
-            passHash = self.hash(temp)
-            self.cursor.execute("UPDATE users SET passwordHash = ? WHERE id = ?", (passHash, userId))
+            if emailActual != emailNuevo:
+                self.cursor.execute("SELECT id FROM users WHERE email = ?", (emailNuevo,))
+                if self.cursor.fetchone():
+                    return False
+            
+            self.cursor.execute("UPDATE users SET email = ?, nombre = ? WHERE email = ?", 
+                              (emailNuevo, nombre, emailActual))
             self.conn.commit()
-            return temp
-        except:
-            return "Error123!"
+            return True
+        except sqlite3.IntegrityError:
+            return False
+    
+    def actualizarSeguridad(self, email, passwordActual, passwordNueva, pregunta, respuesta):
+        if passwordNueva:
+            hashActual = self.hash(passwordActual)
+            self.cursor.execute("SELECT id FROM users WHERE email = ? AND passwordHash = ?", 
+                              (email, hashActual))
+            if not self.cursor.fetchone():
+                return False
+            
+            hashNueva = self.hash(passwordNueva)
+            self.cursor.execute("UPDATE users SET passwordHash = ? WHERE email = ?", 
+                              (hashNueva, email))
+        
+        if pregunta and respuesta:
+            respHash = self.hash(respuesta.lower().strip())
+            self.cursor.execute("UPDATE users SET securityQuestion = ?, securityAnswerHash = ? WHERE email = ?",
+                              (pregunta, respHash, email))
+        
+        self.conn.commit()
+        return True
     
     def cerrar(self):
         self.conn.close()

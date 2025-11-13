@@ -4,8 +4,8 @@ from email.mime.multipart import MIMEMultipart
 
 class ServicioCorreo:
     def __init__(self):
-        self.correoRemitente = "expoferia.ingenieria@gmail.com"
-        self.passwordApp = "ywrm tujs byyo usge".replace(" ", "")
+        self.correoRemitente = "codigogenerador45@gmail.com"
+        self.passwordApp = "gvszgpushpbwohkq"
         self.servidorSmtp = "smtp.gmail.com"
         self.puertoSmtp = 587
     
